@@ -4,6 +4,7 @@ import { Dashboard } from '@/app/components/Dashboard';
 import { StockUpdate } from '@/app/components/StockUpdate';
 import { StockRequest } from '@/app/components/StockRequest';
 import { Transactions } from '@/app/components/Transactions';
+import { Storage } from '@/app/components/Storage';
 
 export default function App() {
   return (
@@ -14,8 +15,7 @@ export default function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/stock-update" element={<StockUpdate />} />
           <Route path="/stock-request" element={<StockRequest />} />
-          {/* Placeholder routes for other pages */}
-          <Route path="/storage" element={<Dashboard />} />
+          <Route path="/storage" element={<Storage />} />
           <Route path="/transactions" element={<Transactions />} />
           <Route path="/ai-assistant" element={<Dashboard />} />
           <Route path="/price-graph" element={<Dashboard />} />
