@@ -6,6 +6,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import mongoose from 'mongoose';
 import { analyzeCropImage } from './services/gemini.service.js';
+import aiAssistant from './services/ai-assistant.service.js';
 import Crop from './models/Crop.js';
 import fs from 'fs';
 
@@ -217,6 +218,99 @@ app.delete('/api/crops/:cropId', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to delete crop'
+    });
+  }
+});
+
+// AI Assistant Routes
+app.post('/api/ai-assistant/chat', async (req, res) => {
+  try {
+    const { message, userId, userType } = req.body;
+
+    // Validation
+    if (!message || !userId || !userType) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields: message, userId, userType'
+      });
+    }
+
+    if (!['farmer', 'buyer'].includes(userType)) {
+      return res.status(400).json({
+        success: false,
+        message: 'userType must be either "farmer" or "buyer"'
+      });
+    }
+
+    // Call AI Assistant
+    const result = await aiAssistant.chat(userId, userType, message);
+
+    res.json(result);
+
+  } catch (error) {
+    console.error('❌ AI Chat Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to process chat request',
+      error: error.message
+    });
+  }
+});
+
+// Get quick suggestions
+app.get('/api/ai-assistant/suggestions', async (req, res) => {
+  try {
+    const { userId, userType } = req.query;
+
+    if (!userId || !userType) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required parameters: userId, userType'
+      });
+    }
+
+    const suggestions = await aiAssistant.getQuickSuggestions(userId, userType);
+
+    res.json({
+      success: true,
+      suggestions
+    });
+
+  } catch (error) {
+    console.error('❌ Suggestions Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get suggestions',
+      error: error.message
+    });
+  }
+});
+
+// Clear conversation history
+app.post('/api/ai-assistant/clear-history', async (req, res) => {
+  try {
+    const { userId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required field: userId'
+      });
+    }
+
+    aiAssistant.clearHistory(userId);
+
+    res.json({
+      success: true,
+      message: 'Conversation history cleared'
+    });
+
+  } catch (error) {
+    console.error('❌ Clear History Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to clear history',
+      error: error.message
     });
   }
 });
