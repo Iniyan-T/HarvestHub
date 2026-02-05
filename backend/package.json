@@ -6,7 +6,13 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "database-setup": "node database-setup.js",
+    "validate-database": "node validate-database.js",
+    "test-api": "node test-complete-api.js",
+    "test-buyer-flow": "node test-buyer-request-flow.js",
+    "test-quick": "node quick-test.js",
+    "test-all": "npm run database-setup && npm run validate-database && npm run test-quick"
   },
   "keywords": [
     "agriculture",
@@ -17,9 +23,11 @@
   "license": "ISC",
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
+    "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.0",
     "mongoose": "^8.9.3",
     "multer": "^1.4.5-lts.1",
     "ollama": "^0.6.3"
