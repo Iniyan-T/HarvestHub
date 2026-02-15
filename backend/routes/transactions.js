@@ -141,6 +141,56 @@ router.get('/my-transactions', authenticate, async (req, res) => {
   }
 });
 
+// READ: Get transactions by user ID (for URL-based access)
+router.get('/user/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { skip = 0, limit = 50, status } = req.query;
+
+    if (!userId || userId === 'undefined') {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid user ID is required'
+      });
+    }
+
+    const filter = {
+      $or: [
+        { buyerId: userId },
+        { farmerId: userId }
+      ]
+    };
+
+    if (status) filter.status = status;
+
+    const transactions = await Transaction.find(filter)
+      .populate('orderId', 'orderNumber totalAmount')
+      .populate('buyerId', 'name email phone')
+      .populate('farmerId', 'name email phone')
+      .sort({ createdAt: -1 })
+      .skip(parseInt(skip))
+      .limit(parseInt(limit));
+
+    const total = await Transaction.countDocuments(filter);
+
+    res.json({
+      success: true,
+      data: transactions,
+      pagination: {
+        total,
+        skip: parseInt(skip),
+        limit: parseInt(limit)
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching user transactions:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch transactions'
+    });
+  }
+});
+
 // READ: Get transaction details
 router.get('/:transactionId', authenticate, async (req, res) => {
   try {

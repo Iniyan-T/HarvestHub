@@ -57,14 +57,10 @@ const storageReadingSchema = new mongoose.Schema({
   },
   timestamp: {
     type: Date,
-    default: Date.now,
-    index: true
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now,
-    index: true
+    default: Date.now
   }
+}, {
+  timestamps: true
 });
 
 // Auto-delete readings older than 90 days

@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Send, Sparkles, Trash2, Loader2 } from 'lucide-react';
+import { useParams } from 'react-router';
+import { getValidatedUserId } from '../utils/validation';
 import { 
   sendChatMessage, 
   getQuickSuggestions, 
@@ -8,8 +10,9 @@ import {
 } from '../services/ai-assistant.service';
 
 export function AIAssistant() {
-  // TODO: Replace with actual user ID from auth context
-  const userId = 'buyer_001';
+  const { userId: urlUserId } = useParams<{ userId: string }>();
+  
+  const { userId } = getValidatedUserId(urlUserId);
   const userType = 'buyer';
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -103,23 +106,23 @@ export function AIAssistant() {
   };
 
   return (
-    <div className="p-8 h-screen flex flex-col">
-      <div className="flex-1 flex flex-col bg-white rounded-lg border border-gray-200 shadow-sm max-w-6xl mx-auto w-full">
+    <div className="h-screen flex flex-col bg-gradient-to-br from-gray-50 to-gray-100 p-8">
+      <div className="flex-1 flex flex-col bg-white rounded-2xl shadow-lg max-w-6xl mx-auto w-full overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-emerald-50 to-blue-50 rounded-t-lg">
+        <div className="flex items-center justify-between px-6 py-5 bg-gradient-to-r from-green-500 to-green-600 shadow-md">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-emerald-600 flex items-center justify-center">
-              <Sparkles className="w-5 h-5 text-white" />
+            <div className="w-12 h-12 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center shadow-md">
+              <Sparkles className="w-6 h-6 text-white" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-gray-800">AI Assistant</h2>
-              <p className="text-xs text-gray-600">Powered by Gemini AI</p>
+              <h2 className="text-xl font-bold text-white">AI Assistant</h2>
+              <p className="text-xs text-green-50">Powered by Gemini AI</p>
             </div>
           </div>
           {messages.length > 0 && (
             <button
               onClick={handleClearHistory}
-              className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+              className="p-2.5 text-white hover:bg-white/20 rounded-xl transition-all shadow-sm hover:shadow-md"
               title="Clear history"
             >
               <Trash2 className="w-5 h-5" />
@@ -128,23 +131,23 @@ export function AIAssistant() {
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+        <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-gradient-to-br from-gray-50/50 to-white">
           {messages.length === 0 ? (
             <div className="text-center py-12">
-              <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-4">
-                <Sparkles className="w-8 h-8 text-emerald-600" />
+              <div className="w-20 h-20 rounded-full bg-gradient-to-br from-green-400 to-green-600 flex items-center justify-center mx-auto mb-4 shadow-lg">
+                <Sparkles className="w-10 h-10 text-white" />
               </div>
-              <h3 className="text-lg font-semibold text-gray-800 mb-2">Welcome! How can I help you today?</h3>
+              <h3 className="text-2xl font-bold text-gray-800 mb-2">Welcome! How can I help you today?</h3>
               <p className="text-sm text-gray-600 mb-6">Ask me to find farmers, analyze crop quality, or get market insights</p>
               
               {suggestions.length > 0 && (
                 <div className="space-y-2 max-w-md mx-auto">
-                  <p className="text-xs text-gray-500 font-medium">Quick suggestions:</p>
+                  <p className="text-xs text-gray-500 font-semibold uppercase tracking-wide mb-3">Quick suggestions:</p>
                   {suggestions.map((suggestion, index) => (
                     <button
                       key={index}
                       onClick={() => handleSendMessage(suggestion)}
-                      className="block w-full text-left px-4 py-3 bg-gray-50 hover:bg-emerald-50 border border-gray-200 hover:border-emerald-300 rounded-lg text-sm text-gray-700 hover:text-emerald-700 transition-colors"
+                      className="block w-full text-left px-5 py-3 bg-white hover:bg-gradient-to-r hover:from-green-50 hover:to-green-100 border-2 border-gray-200 hover:border-green-300 rounded-xl text-sm text-gray-700 hover:text-green-700 transition-all shadow-sm hover:shadow-md font-medium"
                     >
                       {suggestion}
                     </button>
@@ -160,14 +163,14 @@ export function AIAssistant() {
                   className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
                 >
                   <div
-                    className={`max-w-[80%] rounded-lg px-4 py-3 ${
+                    className={`max-w-[80%] rounded-2xl px-5 py-3 shadow-md ${
                       message.role === 'user'
-                        ? 'bg-emerald-600 text-white'
-                        : 'bg-gray-100 text-gray-800'
+                        ? 'bg-gradient-to-br from-green-500 to-green-600 text-white rounded-br-sm'
+                        : 'bg-white border-2 border-gray-200 text-gray-800 rounded-bl-sm'
                     }`}
                   >
-                    <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-                    <p className={`text-xs mt-1 ${message.role === 'user' ? 'text-emerald-100' : 'text-gray-500'}`}>
+                    <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.content}</p>
+                    <p className={`text-xs mt-2 ${message.role === 'user' ? 'text-green-100' : 'text-gray-500'}`}>
                       {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </p>
                   </div>
@@ -175,9 +178,9 @@ export function AIAssistant() {
               ))}
               {isLoading && (
                 <div className="flex justify-start">
-                  <div className="bg-gray-100 rounded-lg px-4 py-3 flex items-center gap-2">
-                    <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
-                    <span className="text-sm text-gray-600">Thinking...</span>
+                  <div className="bg-white border-2 border-gray-200 rounded-2xl px-5 py-3 flex items-center gap-2 shadow-md">
+                    <Loader2 className="w-4 h-4 animate-spin text-green-600" />
+                    <span className="text-sm text-gray-700 font-medium">Thinking...</span>
                   </div>
                 </div>
               )}
@@ -187,8 +190,8 @@ export function AIAssistant() {
         </div>
 
         {/* Input */}
-        <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-lg">
-          <div className="flex gap-2">
+        <div className="px-6 py-5 border-t-2 border-gray-200 bg-white">
+          <div className="flex gap-3">
             <input
               type="text"
               value={inputMessage}
@@ -196,12 +199,12 @@ export function AIAssistant() {
               onKeyPress={handleKeyPress}
               placeholder="Ask me anything..."
               disabled={isLoading}
-              className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
+              className="flex-1 px-5 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed transition-all font-medium"
             />
             <button
               onClick={() => handleSendMessage()}
               disabled={!inputMessage.trim() || isLoading}
-              className="px-6 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+              className="px-6 py-3 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-xl hover:from-green-600 hover:to-green-700 disabled:from-gray-300 disabled:to-gray-400 disabled:cursor-not-allowed transition-all shadow-md hover:shadow-lg flex items-center gap-2 font-medium"
             >
               {isLoading ? (
                 <Loader2 className="w-5 h-5 animate-spin" />

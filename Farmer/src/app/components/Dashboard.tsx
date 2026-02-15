@@ -1,6 +1,6 @@
 import { User, Plus } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 
 interface Crop {
   _id: string;
@@ -69,18 +69,32 @@ export function Dashboard() {
   const [apiCrops, setApiCrops] = useState<Crop[]>([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+  const { userId } = useParams<{ userId: string }>();
 
-  // Temporary farmer ID - replace with actual auth later
-  const farmerId = '507f1f77bcf86cd799439011';
+  // Get userId from URL params or localStorage - treat 'undefined' string as invalid
+  // Also validate that it's a valid MongoDB ObjectId (24 hex characters)
+  const isValidObjectId = (id: string | null | undefined): boolean => {
+    return !!id && /^[0-9a-fA-F]{24}$/.test(id);
+  };
+  
+  const urlUserId = isValidObjectId(userId) ? userId : null;
+  const storedUserId = localStorage.getItem('userId');
+  const currentUserId = urlUserId || (isValidObjectId(storedUserId) ? storedUserId : null);
+  const farmerId = currentUserId || '';
+  const basePath = farmerId ? `/${farmerId}` : '';
 
   useEffect(() => {
-    fetchCrops();
-  }, []);
+    if (farmerId) {
+      fetchCrops();
+    }
+  }, [farmerId]);
 
   const fetchCrops = async () => {
     try {
+      console.log('Fetching crops for farmer:', farmerId);
       const response = await fetch(`http://localhost:5000/api/crops/farmer/${farmerId}`);
       const data = await response.json();
+      console.log('Crops response:', data);
       
       if (data.success) {
         setApiCrops(data.data);
@@ -161,7 +175,7 @@ export function Dashboard() {
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-lg text-gray-800 font-semibold">My Crops</h3>
             <button
-              onClick={() => navigate('/stock-update')}
+              onClick={() => navigate(`${basePath}/stock-update`)}
               className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
             >
               <Plus className="w-5 h-5" />
@@ -178,7 +192,7 @@ export function Dashboard() {
             <div className="text-center py-12 bg-white rounded-lg border-2 border-dashed border-gray-300">
               <p className="text-gray-600 text-lg mb-4">No crops added yet</p>
               <button
-                onClick={() => navigate('/stock-update')}
+                onClick={() => navigate(`${basePath}/stock-update`)}
                 className="px-6 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
               >
                 Add Your First Crop

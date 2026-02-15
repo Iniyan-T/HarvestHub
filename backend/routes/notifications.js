@@ -1,6 +1,6 @@
 import express from 'express';
 import Notification from '../models/Notification.js';
-import { authenticate } from '../middleware/auth.js';
+import { authenticate, authorize } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -62,8 +62,8 @@ router.get('/unread/count', authenticate, async (req, res) => {
   }
 });
 
-// POST create notification
-router.post('/', authenticate, async (req, res) => {
+// POST create notification (admin only - for system notifications)
+router.post('/', authenticate, authorize('admin'), async (req, res) => {
   try {
     const {
       userId,

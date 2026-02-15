@@ -1,5 +1,6 @@
 import { Upload, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { useState } from 'react';
+import { useParams } from 'react-router-dom';
 
 interface AIGrade {
   grade: string;
@@ -11,6 +12,13 @@ interface AIGrade {
 }
 
 export function AddCrop() {
+  const { userId } = useParams<{ userId: string }>();
+  
+  // Get farmer ID - treat 'undefined' string as invalid
+  const urlUserId = userId && userId !== 'undefined' ? userId : null;
+  const storedUserId = localStorage.getItem('userId');
+  const FARMER_ID = urlUserId || (storedUserId && storedUserId !== 'undefined' ? storedUserId : '');
+  
   const [formData, setFormData] = useState({
     cropType: '',
     quantity: '',
@@ -62,14 +70,25 @@ export function AddCrop() {
     setLoading(true);
 
     try {
+      // Get auth token from localStorage (optional - backend works without it now)
+      const token = localStorage.getItem('token') || localStorage.getItem('farmerAuthToken');
+
       const formDataToSend = new FormData();
       formDataToSend.append('image', image);
       formDataToSend.append('cropType', formData.cropType);
       formDataToSend.append('quantity', formData.quantity);
       formDataToSend.append('price', formData.price);
+      formDataToSend.append('farmerId', FARMER_ID);
+
+      // Build headers - include token if available
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
 
       const response = await fetch('http://localhost:5000/api/crops/analyze', {
         method: 'POST',
+        headers,
         body: formDataToSend,
       });
 

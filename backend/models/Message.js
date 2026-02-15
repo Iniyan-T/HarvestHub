@@ -34,11 +34,6 @@ const messageSchema = new mongoose.Schema({
   relatedOrderId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'PurchaseOrder'
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now,
-    index: true
   }
 }, {
   timestamps: true

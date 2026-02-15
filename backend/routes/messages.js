@@ -80,7 +80,21 @@ router.get('/conversation/:userId', authenticate, async (req, res) => {
     const { skip = 0, limit = 50 } = req.query;
     const otherUserId = req.params.userId;
 
-    const conversationId = createConversationId(req.user._id, otherUserId);
+    // Get other user's information to create proper conversation ID
+    const otherUser = await User.findById(otherUserId);
+    if (!otherUser) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    const conversationId = createConversationId(
+      req.user._id,
+      req.user.role,
+      otherUserId,
+      otherUser.role
+    );
 
     const messages = await Message.find({ conversationId })
       .populate('senderId', 'name email phone profileImage')
@@ -327,6 +341,214 @@ router.delete('/:messageId', authenticate, async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to delete message'
+    });
+  }
+});
+
+// READ: Get all conversations for a user by ID (for URL-based access)
+router.get('/user/:userId/conversations', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { skip = 0, limit = 50 } = req.query;
+
+    if (!userId || userId === 'undefined') {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid user ID is required'
+      });
+    }
+
+    const mongoose = await import('mongoose');
+    const userObjectId = new mongoose.default.Types.ObjectId(userId);
+
+    // Get unique conversation partners
+    const conversations = await Message.aggregate([
+      {
+        $match: {
+          $or: [
+            { senderId: userObjectId },
+            { receiverId: userObjectId }
+          ]
+        }
+      },
+      {
+        $group: {
+          _id: '$conversationId',
+          lastMessage: { $first: '$message' },
+          lastMessageTime: { $first: '$createdAt' },
+          otherUserId: {
+            $first: {
+              $cond: [
+                { $eq: ['$senderId', userObjectId] },
+                '$receiverId',
+                '$senderId'
+              ]
+            }
+          },
+          unreadCount: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $eq: ['$receiverId', userObjectId] },
+                    { $eq: ['$isRead', false] }
+                  ]
+                },
+                1,
+                0
+              ]
+            }
+          }
+        }
+      },
+      { $sort: { lastMessageTime: -1 } },
+      { $skip: parseInt(skip) },
+      { $limit: parseInt(limit) }
+    ]);
+
+    // Populate user details
+    for (let conv of conversations) {
+      const user = await User.findById(conv.otherUserId).select('name email phone role');
+      conv.otherUser = user;
+    }
+
+    res.json({
+      success: true,
+      data: conversations
+    });
+  } catch (error) {
+    console.error('Error fetching user conversations:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch conversations'
+    });
+  }
+});
+
+// READ: Get messages between two users by ID (for URL-based access)
+router.get('/user/:userId/conversation/:otherUserId', async (req, res) => {
+  try {
+    const { userId, otherUserId } = req.params;
+    const { skip = 0, limit = 100 } = req.query;
+
+    if (!userId || userId === 'undefined' || !otherUserId || otherUserId === 'undefined') {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid user IDs are required'
+      });
+    }
+
+    // Get both users to determine roles
+    const user1 = await User.findById(userId);
+    const user2 = await User.findById(otherUserId);
+
+    if (!user1 || !user2) {
+      return res.status(404).json({
+        success: false,
+        message: 'One or both users not found'
+      });
+    }
+
+    // Create conversation ID with role-aware format
+    const conversationId = createConversationId(userId, user1.role, otherUserId, user2.role);
+
+    const messages = await Message.find({ conversationId })
+      .populate('senderId', 'name email phone role')
+      .populate('receiverId', 'name email phone role')
+      .sort({ createdAt: -1 })
+      .skip(parseInt(skip))
+      .limit(parseInt(limit));
+
+    // Mark messages as read for the requesting user
+    const mongoose = await import('mongoose');
+    const userObjectId = new mongoose.default.Types.ObjectId(userId);
+    await Message.updateMany(
+      {
+        conversationId,
+        receiverId: userObjectId,
+        isRead: false
+      },
+      {
+        isRead: true,
+        readAt: new Date()
+      }
+    );
+
+    res.json({
+      success: true,
+      data: messages.reverse()
+    });
+  } catch (error) {
+    console.error('Error fetching conversation:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch conversation'
+    });
+  }
+});
+
+// SEND: Send a message using URL-based sender ID (no auth required)
+router.post('/user/:senderId/send', async (req, res) => {
+  try {
+    const { senderId } = req.params;
+    const { receiverId, message, messageType = 'text' } = req.body;
+
+    if (!senderId || senderId === 'undefined') {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid sender ID is required'
+      });
+    }
+
+    if (!receiverId || !message) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide receiverId and message'
+      });
+    }
+
+    // Verify both users exist
+    const sender = await User.findById(senderId);
+    const receiver = await User.findById(receiverId);
+
+    if (!sender) {
+      return res.status(404).json({
+        success: false,
+        message: 'Sender not found'
+      });
+    }
+
+    if (!receiver) {
+      return res.status(404).json({
+        success: false,
+        message: 'Receiver not found'
+      });
+    }
+
+    // Create conversation ID with role-aware format
+    const conversationId = createConversationId(senderId, sender.role, receiverId, receiver.role);
+
+    const newMessage = await Message.create({
+      senderId,
+      receiverId,
+      conversationId,
+      message,
+      messageType
+    });
+
+    await newMessage.populate('senderId', 'name email phone role');
+    await newMessage.populate('receiverId', 'name email phone role');
+
+    res.status(201).json({
+      success: true,
+      message: 'Message sent successfully',
+      data: newMessage
+    });
+  } catch (error) {
+    console.error('❌ Send Message (URL-based) Error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to send message'
     });
   }
 });

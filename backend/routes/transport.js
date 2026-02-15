@@ -348,4 +348,53 @@ router.get('/buyer/my-transports', authenticate, authorize('buyer'), async (req,
   }
 });
 
+// READ: Get transports by user ID (for URL-based access)
+router.get('/user/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { status, skip = 0, limit = 50 } = req.query;
+
+    if (!userId || userId === 'undefined') {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid user ID is required'
+      });
+    }
+
+    const filter = {
+      $or: [
+        { farmerId: userId },
+        { buyerId: userId }
+      ]
+    };
+    if (status) filter.status = status;
+
+    const transports = await Transport.find(filter)
+      .populate('orderId', 'orderNumber totalAmount')
+      .populate('buyerId', 'name email phone')
+      .populate('farmerId', 'name email phone')
+      .sort({ createdAt: -1 })
+      .skip(parseInt(skip))
+      .limit(parseInt(limit));
+
+    const total = await Transport.countDocuments(filter);
+
+    res.json({
+      success: true,
+      data: transports,
+      pagination: {
+        total,
+        skip: parseInt(skip),
+        limit: parseInt(limit)
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching user transports:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch transports'
+    });
+  }
+});
+
 export default router;

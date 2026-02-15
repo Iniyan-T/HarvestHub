@@ -41,6 +41,26 @@ export const authenticate = async (req, res, next) => {
   }
 };
 
+// Optional authentication - continues even if no token provided
+export const optionalAuth = async (req, res, next) => {
+  try {
+    const token = req.headers.authorization?.split(' ')[1];
+
+    if (token) {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_jwt_secret_key_change_this');
+      const user = await User.findById(decoded.id);
+      if (user) {
+        req.user = user;
+        req.user.role = decoded.role;
+      }
+    }
+    next();
+  } catch (error) {
+    // Continue without auth if token is invalid
+    next();
+  }
+};
+
 // Role-based authorization middleware
 export const authorize = (...roles) => {
   return (req, res, next) => {
@@ -51,6 +71,26 @@ export const authorize = (...roles) => {
       });
     }
 
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        message: `Forbidden: This action requires one of these roles: ${roles.join(', ')}`
+      });
+    }
+
+    next();
+  };
+};
+
+// Optional role check - skips if no user but validates role if authenticated
+export const optionalAuthorize = (...roles) => {
+  return (req, res, next) => {
+    // If no user, continue (will use farmerId from form data)
+    if (!req.user) {
+      return next();
+    }
+
+    // If user exists, check role
     if (!roles.includes(req.user.role)) {
       return res.status(403).json({
         success: false,

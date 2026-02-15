@@ -9,11 +9,11 @@ const farmerProfileSchema = new mongoose.Schema({
   },
   farmName: {
     type: String,
-    required: true
+    required: false
   },
   farmSize: {
     type: Number, // in acres
-    required: true
+    required: false
   },
   farmLicense: String,
   soilType: String,

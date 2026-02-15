@@ -1,5 +1,6 @@
 import { Edit2, X, AlertCircle, Trash2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
+import { useParams } from 'react-router-dom';
 
 interface Crop {
   _id: string;
@@ -20,9 +21,18 @@ interface Crop {
   createdAt: string;
 }
 
-const TEMP_FARMER_ID = '507f1f77bcf86cd799439011';
-
 export function UpdateCrop() {
+  const { userId } = useParams<{ userId: string }>();
+  
+  // Validate userId - must be 24 hex characters (MongoDB ObjectId)
+  const isValidObjectId = (id: string | null | undefined): boolean => {
+    return !!id && /^[0-9a-fA-F]{24}$/.test(id);
+  };
+  
+  const urlUserId = isValidObjectId(userId) ? userId : null;
+  const storedUserId = localStorage.getItem('userId');
+  const farmerId = urlUserId || (isValidObjectId(storedUserId) ? storedUserId : '') || '';
+
   const [crops, setCrops] = useState<Crop[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -37,13 +47,17 @@ export function UpdateCrop() {
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
-    fetchCrops();
-  }, []);
+    if (farmerId) {
+      fetchCrops();
+    }
+  }, [farmerId]);
 
   const fetchCrops = async () => {
+    if (!farmerId) return;
+    
     try {
       setLoading(true);
-      const response = await fetch(`http://localhost:5000/api/crops/farmer/${TEMP_FARMER_ID}`);
+      const response = await fetch(`http://localhost:5000/api/crops/farmer/${farmerId}`);
       const data = await response.json();
       
       if (data.success) {

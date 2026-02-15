@@ -2,13 +2,16 @@ import mongoose from 'mongoose';
 
 const requestSchema = new mongoose.Schema({
   farmerId: {
-    type: String,
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
     required: true,
     index: true
   },
   buyerId: {
-    type: String,
-    required: true
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    index: true
   },
   buyerName: {
     type: String,

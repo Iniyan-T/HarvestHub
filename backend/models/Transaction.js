@@ -4,7 +4,12 @@ const transactionSchema = new mongoose.Schema({
   orderId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'PurchaseOrder',
-    required: true
+    default: null
+  },
+  requestId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Request',
+    default: null
   },
   buyerId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -28,8 +33,20 @@ const transactionSchema = new mongoose.Schema({
   },
   paymentMethod: {
     type: String,
-    enum: ['bank_transfer', 'upi', 'check', 'cash'],
+    enum: ['bank_transfer', 'upi', 'check', 'cash', 'online', 'offline'],
     required: true
+  },
+  cropName: {
+    type: String,
+    default: ''
+  },
+  quantity: {
+    type: Number,
+    default: 0
+  },
+  transportNeeded: {
+    type: Boolean,
+    default: false
   },
   transactionType: {
     type: String,

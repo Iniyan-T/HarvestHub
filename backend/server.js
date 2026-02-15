@@ -5,8 +5,9 @@ import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import mongoose from 'mongoose';
-import{ analyzeCropImage } from './services/gemini.service.js';
+import { analyzeCropImage } from './services/yolo.service.js';
 import aiAssistant from './services/ai-assistant.service.js';
+import notificationService from './services/notification.service.js';
 import Crop from './models/Crop.js';
 import Request from './models/Request.js';
 import User from './models/User.js';
@@ -28,6 +29,7 @@ import fs from 'fs';
 
 // Import Routes
 import authRoutes from './routes/auth.js';
+import { authenticate, authorize, optionalAuth, optionalAuthorize } from './middleware/auth.js';
 import buyerRoutes from './routes/buyer.js';
 import messagesRoutes from './routes/messages.js';
 import wishlistRoutes from './routes/wishlist.js';
@@ -46,11 +48,36 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// ==================== GLOBAL ERROR HANDLERS ====================
+// Catch unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Unhandled Promise Rejection:', reason instanceof Error ? reason.message : reason);
+  if (reason instanceof Error && reason.stack) {
+    console.error('Stack:', reason.stack);
+  }
+});
+
+// Catch uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error('❌ Uncaught Exception:', error.message);
+  if (error.stack) console.error('Stack:', error.stack);
+  // Give time to log, then exit
+  setTimeout(() => process.exit(1), 500);
+});
+
 // MongoDB Connection - Using provided MongoDB URL
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://jagaveeravishnut:qwertyuiop@harvesthub.m09io3e.mongodb.net/?appName=HarvestHub';
-mongoose.connect(MONGODB_URI)
+mongoose.connect(MONGODB_URI, {
+  serverSelectionTimeoutMS: 5000,
+  socketTimeoutMS: 45000,
+  retryWrites: true,
+  w: 'majority'
+})
   .then(() => console.log('✅ MongoDB Connected'))
-  .catch((err) => console.error('❌ MongoDB Error:', err));
+  .catch((err) => {
+    console.error('❌ MongoDB Connection Error:', err.message);
+    console.log('⚠️  Server will start but database operations may fail');
+  });
 
 // Middleware
 app.use(cors());
@@ -58,8 +85,13 @@ app.use(express.json());
 app.use('/uploads', express.static('uploads'));
 
 // Create uploads directory if it doesn't exist
-if (!fs.existsSync('uploads')) {
-  fs.mkdirSync('uploads');
+try {
+  if (!fs.existsSync('uploads')) {
+    fs.mkdirSync('uploads', { recursive: true });
+    console.log('✅ Uploads directory created');
+  }
+} catch (err) {
+  console.warn('⚠️  Could not create uploads directory:', err.message);
 }
 
 // Configure Multer for image upload
@@ -90,7 +122,7 @@ const upload = multer({
 });
 
 // API Endpoint: Upload, Analyze & Save Crop
-app.post('/api/crops/analyze', upload.single('image'), async (req, res) => {
+app.post('/api/crops/analyze', optionalAuth, optionalAuthorize('farmer'), upload.single('image'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ 
@@ -108,16 +140,27 @@ app.post('/api/crops/analyze', upload.single('image'), async (req, res) => {
       });
     }
 
-    console.log('📸 Analyzing image:', req.file.filename);
+    // Use authenticated user ID or fallback to farmerId from form data
+    const farmerIdToUse = req.user?._id || farmerId;
     
-    // Analyze image with Gemini Vision API
+    if (!farmerIdToUse) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Farmer ID is required. Please login or provide farmerId.' 
+      });
+    }
+
+    console.log('📸 Analyzing image:', req.file.filename);
+    console.log('👨‍🌾 Farmer ID:', farmerIdToUse);
+    
+    // Analyze image with YOLOv5
     const aiGrade = await analyzeCropImage(req.file.path);
     
     console.log('✅ AI Analysis complete:', aiGrade.grade);
 
-    // Save to MongoDB
+    // Save to MongoDB with farmer ID
     const newCrop = new Crop({
-      farmerId: farmerId || '507f1f77bcf86cd799439011',
+      farmerId: farmerIdToUse,
       cropName: cropType,
       quantity: parseFloat(quantity),
       price: parseFloat(price),
@@ -145,12 +188,14 @@ app.post('/api/crops/analyze', upload.single('image'), async (req, res) => {
   }
 });
 
-// API Endpoint: Get all crops for a farmer
-app.get('/api/crops/farmer/:farmerId', async (req, res) => {
+// API Endpoint: Get all crops for authenticated farmer
+app.get('/api/crops/farmer/my-crops', authenticate, authorize('farmer'), async (req, res) => {
   try {
     const crops = await Crop.find({ 
-      farmerId: req.params.farmerId 
-    }).sort({ createdAt: -1 });
+      farmerId: req.user._id 
+    })
+    .populate('farmerId', 'name email phone')
+    .sort({ createdAt: -1 });
 
     res.json({
       success: true,
@@ -158,6 +203,35 @@ app.get('/api/crops/farmer/:farmerId', async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch crops'
+    });
+  }
+});
+
+// API Endpoint: Get crops by farmer ID (for URL-based access)
+app.get('/api/crops/farmer/:farmerId', async (req, res) => {
+  try {
+    const { farmerId } = req.params;
+    
+    if (!farmerId || farmerId === 'undefined') {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid farmer ID is required'
+      });
+    }
+
+    const crops = await Crop.find({ farmerId })
+      .populate('farmerId', 'name email phone')
+      .sort({ createdAt: -1 });
+
+    res.json({
+      success: true,
+      data: crops
+    });
+  } catch (error) {
+    console.error('Error fetching crops for farmer:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch crops'
@@ -174,7 +248,9 @@ app.get('/api/crops', async (req, res) => {
     if (grade) filter['aiGrade.grade'] = grade;
     if (status) filter.status = status;
 
-    const crops = await Crop.find(filter).sort({ createdAt: -1 });
+    const crops = await Crop.find(filter)
+      .populate('farmerId', 'name email phone address profileImage')
+      .sort({ createdAt: -1 });
 
     res.json({
       success: true,
@@ -253,6 +329,65 @@ app.delete('/api/crops/:cropId', async (req, res) => {
 
 // ==================== FARMER MANAGEMENT ROUTES ====================
 
+// API Endpoint: Get all farmers with their available crops summary
+app.get('/api/farmers', async (req, res) => {
+  try {
+    // Get all farmer users
+    const farmers = await User.find({ role: 'farmer', isActive: true })
+      .select('name email phone address profileImage')
+      .lean();
+
+    if (!farmers.length) {
+      return res.json({ success: true, data: [] });
+    }
+
+    // Get FarmerProfile for each farmer
+    const farmerIds = farmers.map(f => f._id);
+    const profiles = await FarmerProfile.find({ userId: { $in: farmerIds } }).lean();
+    const profileMap = {};
+    profiles.forEach(p => { profileMap[p.userId.toString()] = p; });
+
+    // Get crop counts per farmer (only available)
+    const cropAgg = await Crop.aggregate([
+      { $match: { farmerId: { $in: farmerIds }, status: 'Available' } },
+      { $group: {
+        _id: '$farmerId',
+        cropsCount: { $sum: 1 },
+        totalQuantity: { $sum: '$quantity' },
+        cropNames: { $addToSet: '$cropName' }
+      }}
+    ]);
+    const cropMap = {};
+    cropAgg.forEach(c => { cropMap[c._id.toString()] = c; });
+
+    const result = farmers.map(f => {
+      const id = f._id.toString();
+      const profile = profileMap[id] || {};
+      const cropInfo = cropMap[id] || { cropsCount: 0, totalQuantity: 0, cropNames: [] };
+      return {
+        _id: f._id,
+        name: f.name || 'Unknown Farmer',
+        email: f.email,
+        phone: f.phone || 'Not available',
+        address: f.address || {},
+        profileImage: f.profileImage,
+        farmName: profile.farmName || '',
+        farmSize: profile.farmSize || 0,
+        rating: profile.rating || 0,
+        verificationStatus: profile.verificationStatus || 'pending',
+        cropsCount: cropInfo.cropsCount,
+        totalQuantity: cropInfo.totalQuantity,
+        cropNames: cropInfo.cropNames
+      };
+    });
+
+    res.json({ success: true, data: result });
+  } catch (error) {
+    console.error('❌ Error fetching farmers:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch farmers' });
+  }
+});
+
 // API Endpoint: Get farmer details by farmerId (userId)
 app.get('/api/farmers/:farmerId', async (req, res) => {
   try {
@@ -269,12 +404,28 @@ app.get('/api/farmers/:farmerId', async (req, res) => {
 
     const farmerProfile = await FarmerProfile.findOne({ userId: farmerId });
     
+    // Build location string from address
+    const addressParts = [];
+    if (user.address?.city) addressParts.push(user.address.city);
+    if (user.address?.state) addressParts.push(user.address.state);
+    if (user.address?.country) addressParts.push(user.address.country);
+    const locationStr = addressParts.length > 0 ? addressParts.join(', ') : 'Location not specified';
+
     // Combine user and profile data
     const farmerData = {
       _id: user._id,
       name: user.name || 'Unknown Farmer',
-      location: farmerProfile?.farmName || user.location || 'Location not specified',
-      contact: user.contact || user.phone || 'Contact not available'
+      email: user.email || '',
+      phone: user.phone || 'Not available',
+      location: locationStr,
+      address: user.address || {},
+      contact: user.phone || 'Not available',
+      profileImage: user.profileImage,
+      farmName: farmerProfile?.farmName || '',
+      farmSize: farmerProfile?.farmSize || 0,
+      rating: farmerProfile?.rating || 0,
+      verificationStatus: farmerProfile?.verificationStatus || 'pending',
+      yearsOfExperience: farmerProfile?.yearsOfExperience || 0,
     };
 
     res.json({
@@ -295,11 +446,13 @@ app.get('/api/farmers/by-crop/:cropName', async (req, res) => {
   try {
     const cropName = req.params.cropName;
     
-    // Find all available crops with the given crop name
+    // Find all available crops with the given crop name and populate farmer info
     const crops = await Crop.find({ 
       cropName: { $regex: new RegExp(`^${cropName}$`, 'i') },
       status: 'Available' 
-    }).sort({ price: 1 });
+    })
+    .populate('farmerId', 'name email phone address profileImage')
+    .sort({ price: 1 });
 
     if (crops.length === 0) {
       return res.json({
@@ -310,7 +463,7 @@ app.get('/api/farmers/by-crop/:cropName', async (req, res) => {
     }
 
     // Get unique farmer IDs
-    const farmerIds = [...new Set(crops.map(crop => crop.farmerId))];
+    const farmerIds = [...new Set(crops.map(crop => crop.farmerId._id.toString()))];
     
     // Fetch farmer details for each farmer
     const farmersWithCrops = await Promise.all(
@@ -318,13 +471,13 @@ app.get('/api/farmers/by-crop/:cropName', async (req, res) => {
         try {
           const user = await User.findById(farmerId);
           const farmerProfile = await FarmerProfile.findOne({ userId: farmerId });
-          const farmerCrops = crops.filter(crop => crop.farmerId === farmerId);
+          const farmerCrops = crops.filter(crop => crop.farmerId._id.toString() === farmerId);
           
           return {
             farmerId: farmerId,
             farmerName: user?.name || 'Unknown Farmer',
-            location: farmerProfile?.farmName || user?.location || 'Location not specified',
-            contact: user?.contact || user?.phone || 'Not available',
+            location: farmerProfile?.farmName || user?.address?.city || 'Location not specified',
+            contact: user?.phone || user?.email || 'Not available',
             crops: farmerCrops.map(crop => ({
               _id: crop._id,
               cropName: crop.cropName,
@@ -498,23 +651,32 @@ app.get('/api/storage/alerts/:farmerId', async (req, res) => {
 // ==================== REQUEST MANAGEMENT ROUTES ====================
 
 // API Endpoint: Create a new buyer request
-app.post('/api/requests', async (req, res) => {
+app.post('/api/requests', authenticate, authorize('buyer'), async (req, res) => {
   try {
-    const { farmerId, buyerId, buyerName, buyerContact, cropName, requestedQuantity, offerPrice, paymentMethod, transportNeeded, notes } = req.body;
+    const { farmerId, cropName, requestedQuantity, offerPrice, paymentMethod, transportNeeded, notes } = req.body;
 
     // Validation
-    if (!farmerId || !buyerId || !buyerName || !cropName || !requestedQuantity || !offerPrice) {
+    if (!farmerId || !cropName || !requestedQuantity || !offerPrice) {
       return res.status(400).json({
         success: false,
-        message: 'Missing required fields: farmerId, buyerId, buyerName, cropName, requestedQuantity, offerPrice'
+        message: 'Missing required fields: farmerId, cropName, requestedQuantity, offerPrice'
+      });
+    }
+
+    // Verify farmer exists
+    const farmer = await User.findById(farmerId);
+    if (!farmer || farmer.role !== 'farmer') {
+      return res.status(404).json({
+        success: false,
+        message: 'Farmer not found'
       });
     }
 
     const newRequest = new Request({
       farmerId,
-      buyerId,
-      buyerName,
-      buyerContact: buyerContact || '',
+      buyerId: req.user._id,
+      buyerName: req.user.name,
+      buyerContact: req.user.phone || req.user.email,
       cropName,
       requestedQuantity: parseFloat(requestedQuantity),
       offerPrice: parseFloat(offerPrice),
@@ -528,6 +690,19 @@ app.post('/api/requests', async (req, res) => {
     await newRequest.save();
 
     console.log('✅ Request created:', newRequest._id);
+
+    // Create notification for farmer
+    try {
+      await notificationService.notifyFarmerNewRequest(
+        farmerId,
+        newRequest._id,
+        req.user.name,
+        cropName
+      );
+    } catch (notifError) {
+      console.error('⚠️ Failed to create notification:', notifError.message);
+      // Don't fail the request if notification fails
+    }
 
     res.status(201).json({
       success: true,
@@ -545,12 +720,15 @@ app.post('/api/requests', async (req, res) => {
   }
 });
 
-// API Endpoint: Get all requests for a farmer
-app.get('/api/requests/farmer/:farmerId', async (req, res) => {
+// API Endpoint: Get all requests for authenticated farmer
+app.get('/api/requests/farmer/my-requests', authenticate, authorize('farmer'), async (req, res) => {
   try {
     const requests = await Request.find({ 
-      farmerId: req.params.farmerId 
-    }).sort({ createdAt: -1 });
+      farmerId: req.user._id 
+    })
+    .populate('buyerId', 'name email phone address')
+    .populate('farmerId', 'name email phone')
+    .sort({ createdAt: -1 });
 
     res.json({
       success: true,
@@ -568,12 +746,46 @@ app.get('/api/requests/farmer/:farmerId', async (req, res) => {
   }
 });
 
-// API Endpoint: Get all requests sent by a buyer
-app.get('/api/requests/buyer/:buyerId', async (req, res) => {
+// API Endpoint: Get requests by farmer ID (for URL-based access)
+app.get('/api/requests/farmer/:farmerId', async (req, res) => {
+  try {
+    const { farmerId } = req.params;
+    
+    if (!farmerId || farmerId === 'undefined') {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid farmer ID is required'
+      });
+    }
+
+    const requests = await Request.find({ farmerId })
+      .populate('buyerId', 'name email phone address')
+      .populate('farmerId', 'name email phone')
+      .sort({ createdAt: -1 });
+
+    res.json({
+      success: true,
+      data: requests,
+      count: requests.length
+    });
+  } catch (error) {
+    console.error('Error fetching farmer requests:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch requests'
+    });
+  }
+});
+
+// API Endpoint: Get all requests sent by authenticated buyer
+app.get('/api/requests/buyer/my-requests', authenticate, authorize('buyer'), async (req, res) => {
   try {
     const requests = await Request.find({ 
-      buyerId: req.params.buyerId 
-    }).sort({ createdAt: -1 });
+      buyerId: req.user._id 
+    })
+    .populate('buyerId', 'name email phone address')
+    .populate('farmerId', 'name email phone address')
+    .sort({ createdAt: -1 });
 
     res.json({
       success: true,
@@ -591,8 +803,39 @@ app.get('/api/requests/buyer/:buyerId', async (req, res) => {
   }
 });
 
+// API Endpoint: Get requests by buyer ID (for URL-based access)
+app.get('/api/requests/buyer/:buyerId', async (req, res) => {
+  try {
+    const { buyerId } = req.params;
+    
+    if (!buyerId || buyerId === 'undefined') {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid buyer ID is required'
+      });
+    }
+
+    const requests = await Request.find({ buyerId })
+      .populate('buyerId', 'name email phone address')
+      .populate('farmerId', 'name email phone address')
+      .sort({ createdAt: -1 });
+
+    res.json({
+      success: true,
+      data: requests,
+      count: requests.length
+    });
+  } catch (error) {
+    console.error('Error fetching buyer requests:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch requests'
+    });
+  }
+});
+
 // API Endpoint: Update request status (accept/deny/complete)
-app.put('/api/requests/:requestId', async (req, res) => {
+app.put('/api/requests/:requestId', authenticate, async (req, res) => {
   try {
     const { status, notes } = req.body;
 
@@ -603,14 +846,8 @@ app.put('/api/requests/:requestId', async (req, res) => {
       });
     }
 
-    const updateData = { status };
-    if (notes) updateData.notes = notes;
-
-    const request = await Request.findByIdAndUpdate(
-      req.params.requestId,
-      updateData,
-      { new: true }
-    );
+    // Find request first to check authorization
+    const request = await Request.findById(req.params.requestId);
 
     if (!request) {
       return res.status(404).json({
@@ -619,7 +856,65 @@ app.put('/api/requests/:requestId', async (req, res) => {
       });
     }
 
+    // Check authorization - only farmer or buyer involved can update
+    if (request.farmerId.toString() !== req.user._id.toString() && 
+        request.buyerId.toString() !== req.user._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are not authorized to update this request'
+      });
+    }
+
+    const updateData = { status };
+    if (notes) updateData.notes = notes;
+
+    request.status = status;
+    if (notes) request.notes = notes;
+    await request.save();
+
     console.log('✅ Request updated:', request._id);
+
+    // Auto-create transaction when farmer accepts the request
+    if (status === 'accepted' && req.user._id.toString() === request.farmerId.toString()) {
+      try {
+        const Transaction = (await import('./models/Transaction.js')).default;
+        
+        const transaction = await Transaction.create({
+          requestId: request._id,
+          buyerId: request.buyerId,
+          farmerId: request.farmerId,
+          amount: request.totalAmount,
+          paymentMethod: request.paymentMethod || 'offline',
+          transactionType: 'payment',
+          status: 'completed',
+          paymentDate: new Date(),
+          cropName: request.cropName,
+          quantity: request.requestedQuantity,
+          transportNeeded: request.transportNeeded || false,
+          description: `Payment for ${request.cropName} - ${request.requestedQuantity} kg`
+        });
+
+        console.log('✅ Transaction auto-created:', transaction.transactionId);
+      } catch (txnError) {
+        console.error('⚠️ Failed to create transaction:', txnError.message);
+      }
+    }
+
+    // Notify buyer if farmer updated status
+    if (req.user._id.toString() === request.farmerId.toString() && 
+        ['accepted', 'denied', 'completed'].includes(status)) {
+      try {
+        const farmer = await User.findById(request.farmerId);
+        await notificationService.notifyBuyerRequestResponse(
+          request.buyerId,
+          request._id,
+          status,
+          farmer.name
+        );
+      } catch (notifError) {
+        console.error('⚠️ Failed to create notification:', notifError.message);
+      }
+    }
 
     res.json({
       success: true,
@@ -638,9 +933,9 @@ app.put('/api/requests/:requestId', async (req, res) => {
 });
 
 // API Endpoint: Delete a request
-app.delete('/api/requests/:requestId', async (req, res) => {
+app.delete('/api/requests/:requestId', authenticate, async (req, res) => {
   try {
-    const request = await Request.findByIdAndDelete(req.params.requestId);
+    const request = await Request.findById(req.params.requestId);
 
     if (!request) {
       return res.status(404).json({
@@ -648,6 +943,16 @@ app.delete('/api/requests/:requestId', async (req, res) => {
         message: 'Request not found'
       });
     }
+
+    // Check authorization - only buyer who created it can delete
+    if (request.buyerId.toString() !== req.user._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are not authorized to delete this request'
+      });
+    }
+
+    await Request.findByIdAndDelete(req.params.requestId);
 
     console.log('✅ Request deleted:', request._id);
 
@@ -667,27 +972,20 @@ app.delete('/api/requests/:requestId', async (req, res) => {
 });
 
 // AI Assistant Routes
-app.post('/api/ai-assistant/chat', async (req, res) => {
+app.post('/api/ai-assistant/chat', authenticate, async (req, res) => {
   try {
-    const { message, userId, userType } = req.body;
+    const { message } = req.body;
 
     // Validation
-    if (!message || !userId || !userType) {
+    if (!message) {
       return res.status(400).json({
         success: false,
-        message: 'Missing required fields: message, userId, userType'
+        message: 'Missing required field: message'
       });
     }
 
-    if (!['farmer', 'buyer'].includes(userType)) {
-      return res.status(400).json({
-        success: false,
-        message: 'userType must be either "farmer" or "buyer"'
-      });
-    }
-
-    // Call AI Assistant
-    const result = await aiAssistant.chat(userId, userType, message);
+    // Call AI Assistant with authenticated user's ID and role
+    const result = await aiAssistant.chat(req.user._id.toString(), req.user.role, message);
 
     res.json(result);
 
@@ -702,18 +1000,9 @@ app.post('/api/ai-assistant/chat', async (req, res) => {
 });
 
 // Get quick suggestions
-app.get('/api/ai-assistant/suggestions', async (req, res) => {
+app.get('/api/ai-assistant/suggestions', authenticate, async (req, res) => {
   try {
-    const { userId, userType } = req.query;
-
-    if (!userId || !userType) {
-      return res.status(400).json({
-        success: false,
-        message: 'Missing required parameters: userId, userType'
-      });
-    }
-
-    const suggestions = await aiAssistant.getQuickSuggestions(userId, userType);
+    const suggestions = await aiAssistant.getQuickSuggestions(req.user._id.toString(), req.user.role);
 
     res.json({
       success: true,
@@ -731,18 +1020,9 @@ app.get('/api/ai-assistant/suggestions', async (req, res) => {
 });
 
 // Clear conversation history
-app.post('/api/ai-assistant/clear-history', async (req, res) => {
+app.post('/api/ai-assistant/clear-history', authenticate, async (req, res) => {
   try {
-    const { userId } = req.body;
-
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Missing required field: userId'
-      });
-    }
-
-    aiAssistant.clearHistory(userId);
+    aiAssistant.clearHistory(req.user._id.toString());
 
     res.json({
       success: true,
